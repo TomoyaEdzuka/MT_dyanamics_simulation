@@ -1,0 +1,297 @@
+---
+title: "Microtubule dynamics simulation from experimental data"
+output: 
+  html_document:
+    highlight: "tango"
+    df_print: tibble
+    toc: yes
+---
+
+
+#### platform       x86_64-apple-darwin15.6.0   
+#### arch           x86_64                      
+#### os             darwin15.6.0                
+#### system         x86_64, darwin15.6.0        
+#### status                                     
+#### major          3                           
+#### minor          6.0                         
+#### year           2019                        
+#### month          04                          
+#### day            26                          
+#### svn rev        76424                       
+#### language       R                           
+#### version.string R version 3.6.0 (2019-04-26)
+#### nickname       Planting of a Tree          
+
+
+```{r, message=FALSE}
+library(tidyverse)
+```
+
+```{r}
+
+rlnorm2 <- function(n=1, mean, sd) {
+  sdlog <- sqrt(log((sd/mean)^2 + 1))
+  meanlog <- log(mean) - (sdlog^2) / 2
+  rlnorm(n, meanlog = meanlog, sdlog = sdlog)
+}
+```
+
+
+
+### Assume that growth and shrinkage rate follow log-normal distribution.
+```{r}
+growth_rate <- function(mean, sd){
+  rlnorm2(n=1, mean, sd)
+  }# µm/sec
+shrinkage_rate <- function(mean, sd){
+  rlnorm2(n=1, mean, sd)
+  }# µm/sec
+```
+
+### A function making a single MT dynamics.
+```{r}
+make_instability <- function(time,
+                             catastrophe_freq, 
+                             rescue_freq,
+                             mean_gr, sd_gr,
+                             mean_sr, sd_sr){
+  
+  l <- list(
+    time_s = 1:time,
+    state = rep(NA, time),
+    velocity = rep(NA, time)
+    )
+  
+  
+  ## Make random numbers for growth and shrinkage rate
+  gr_init <- growth_rate(mean = mean_gr, sd = sd_gr)
+  sr_init <- shrinkage_rate(mean = mean_sr, sd = sd_sr)
+  
+  # Start with growth
+  l$state[[1]] <- "growth"
+  l$velocity[[1]] <- gr_init
+  
+  
+  
+  for (i in 2:time){
+  
+    gr <- gr_init
+    sr <- sr_init
+    
+    if (l$state[[i-1]] == "growth") {
+      
+      l$state[[i]] <- sample(x = c("growth", "shrinkage"), 
+                           size = 1, 
+                           replace= TRUE, 
+                           prob = c(1-catastrophe_freq, catastrophe_freq)
+                           )
+      # Make a new random number when the phase (shrinkage to growth) is changed.
+      sr <- shrinkage_rate(mean = mean_sr, sd = sd_sr) 
+      l$velocity[[i]] <- ifelse(l$state[[i]] == "growth", gr, -sr)
+      
+    }else{
+    
+      l$state[[i]] <- sample(x = c("growth", "shrinkage"), 
+                         size = 1,
+                         replace = TRUE,
+                         prob = c(rescue_freq, 1-rescue_freq)
+                         )
+      # Make a new random number when the phase (shrinkage to growth) is changed.
+      gr <- growth_rate(mean = mean_gr, sd = sd_gr)
+      l$velocity[[i]] <- ifelse(l$state[[i]] == "growth", gr, -sr)
+    }
+  }
+  return(as_tibble(l))
+}
+```
+
+
+
+
+### A function making MT dynamics with MT length.
+```{r}
+sim_nMT <- function(group_name = group_name,
+                    time,
+                    cat_freq,
+                    res_freq,
+                    mean_gr, sd_gr,
+                    mean_sr, sd_sr){
+    
+  make_instability(
+                 time = time,
+                 catastrophe_freq = cat_freq,
+                 rescue_freq = res_freq,
+                 mean_gr = mean_gr, sd_gr = sd_gr,
+                 mean_sr = mean_sr, sd_sr = sd_sr
+                 ) %>% 
+    mutate(
+      group = group_name,
+      length = accumulate(.$velocity, .f = `+`)
+      )
+}
+```
+
+
+### Assign parameters gained in the experiments.
+```{r}
+param <- tibble(
+  group_name = c("Control", "Kinesin-13 KO"),
+  time = rep(240, length(group_name)), # time duration 240 s, 4 min
+  cat_freq = c(0.00932, 0.00223),
+  res_freq = c(0.071, 0.071),
+  mean_gr = c(0.147, 0.093),
+  sd_gr =  c(0.005, 0.002),
+  mean_sr = c(0.2450027, 0.4287589),
+  sd_sr = c(0.05928394, 0.10739238)
+  )
+```
+
+### A function making multiple MT dynamics
+```{r}
+MT_track <-function(data, nMT){
+  map(1:nMT, 
+      ~data %>% 
+        pmap(sim_nMT) %>% 
+        map_dfr(bind_rows) %>% 
+        mutate(MT_id = ..1)
+      ) %>% 
+    map_dfr(bind_rows)
+}
+```
+
+
+### Draw MT behavior with 20 examples.
+```{r}
+set.seed(123)
+g <- 
+  MT_track(data = param, nMT = 20) %>% 
+  ggplot(aes(x = time_s, y = length, color = group)) + 
+  geom_path()+
+  theme(axis.text=element_text(size=12)) + 
+  labs(x = "Time (s)", y = "Length change (µm)", color = "") + 
+  ggtitle("Simulated microtubule dynamics")+
+  theme(axis.title.x=element_text(lineheight=.9,family="Helvetica",face="bold"),
+        axis.title.y=element_text(lineheight=.9,family="Helvetica",face="bold"),
+        plot.title=element_text(size=rel(1.4), lineheight=.9,family="Helvetica",face="bold", 
+                                hjust = 0.5))
+
+
+g
+```
+
+
+### Simulation with 4000 MTs
+```{r}
+set.seed(123)
+df <- 
+  MT_track(data = param, nMT = 4000) %>%
+  group_by(group, MT_id) %>% 
+  summarise(mean_length = mean(length),
+            final_length = last(length))
+```
+
+### Calculation of mean of length change 
+```{r}
+df %>% 
+  group_by(group) %>% 
+  summarise(
+    mean_mean_length = mean(mean_length),
+    mean_final_length = mean(final_length)
+            )
+```
+
+### Visualization of mean MT length changes in 4 min.
+```{r}
+df %>% 
+  ggplot(aes(x = group,  y = mean_length)) + 
+  ggbeeswarm::geom_quasirandom() + 
+  theme(axis.text=element_text(size=12)) + 
+  labs(x = "", y = "Mean length change (µm)", color = "") + 
+  ggtitle("Simulated mean microtubule length change in 4 min")+
+  theme(axis.title.x=element_text(lineheight=.9,family="Helvetica",face="bold"),
+        axis.title.y=element_text(lineheight=.9,family="Helvetica",face="bold"),
+        plot.title=element_text(size=rel(1.4), lineheight=.9,family="Helvetica",face="bold", 
+                                hjust = 0.5)) + 
+  ylim(c(-22, 22)) # removed 3 outliers in 4000 to make it easy to see
+```
+### Visualization of MT length change in 4 min elongation.
+```{r}
+df %>% 
+  ggplot(aes(x = group,  y = final_length)) + 
+  ggbeeswarm::geom_quasirandom()+
+  labs(x = "", y = "Length change (µm)", color = "") + 
+  ggtitle("Simulated microtubule length change in 4 min")+
+  theme(axis.text=element_text(size=12)) + 
+  theme(axis.title.x=element_text(lineheight=.9,family="Helvetica",face="bold"),
+        axis.title.y=element_text(lineheight=.9,family="Helvetica",face="bold"),
+        plot.title=element_text(size=rel(1.4), lineheight=.9,family="Helvetica",face="bold", 
+                                hjust = 0.5)) + 
+  ylim(c(-30, 40)) # removed 6 outliers in 4000 to make it easy to see
+```
+
+
+### Mutate simulated data for calculating probability of becoming longer MTs in Control.
+```{r}
+df_spread <- 
+  df %>%
+  select(-mean_length) %>% 
+  spread(key = group, 
+         value = final_length) %>% 
+  mutate(bool = Control >`Kinesin-13 KO`,
+         difference = Control-`Kinesin-13 KO`)
+```
+
+### Distribution of the difference between Control and KO when simulation is performed.
+```{r}
+df_spread %>%
+  gather(key = group, value = len, Control, `Kinesin-13 KO`) %>% 
+  ggplot(aes(x = "", y = difference))+
+  ggbeeswarm::geom_quasirandom()
+```
+
+### Mean of Control and KO difference in microtubule length change 
+### and probability of Control microtubules becoming longer than KO
+```{r}
+df_spread %>%
+  summarise(prob = mean(bool), mean_diff = mean(difference))
+```
+
+
+
+### A function checking whether the number (n) of microtubules in the simulation is sufficient.
+```{r}
+sampling_test <- function(size, df){
+  sample_n(df, size = size, replace = FALSE) %>% 
+    summarise_at(vars(bool, difference), mean) %>% 
+    rename(prob = bool, mean_diff = difference) %>% 
+    mutate(n = size)
+}
+```
+
+### Execute the function
+```{r}
+n <- df_spread %>% nrow()
+set.seed(123)
+sampling_df <- 
+  map_df(1:n, 
+       ~sampling_test(..1, df = df_spread))
+```
+
+
+### Check if the probability and mean difference converge as n increases
+```{r}
+# Probability
+sampling_df %>% 
+  ggplot(aes(x = n, y = prob)) + 
+  geom_path()
+```
+
+```{r}
+# Differnce
+sampling_df %>% 
+  ggplot(aes(x = n, y = mean_diff)) + 
+  geom_path()
+```
+
+
