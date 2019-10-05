@@ -138,12 +138,12 @@ sim_nMT <- function(group_name = group_name,
 param <- tibble(
   group_name = c("Control", "Kinesin-13 KO"),
   time = rep(240, length(group_name)), # time duration 240 s, 4 min
-  cat_freq = c(0.00932, 0.00223),
-  res_freq = c(0.071, 0.071),
-  mean_gr = c(0.147, 0.093),
-  sd_gr =  c(0.005, 0.002),
-  mean_sr = c(0.2450027, 0.4287589),
-  sd_sr = c(0.05928394, 0.10739238)
+  cat_freq = c(0.0093, 0.0022),
+  res_freq = c(0.017, 0.036),
+  mean_gr = c(0.15, 0.09),
+  sd_gr =  c(0.03, 0.01),
+  mean_sr = c(0.25, 0.43),
+  sd_sr = c(0.06, 0.11)
   )
 ```
 
