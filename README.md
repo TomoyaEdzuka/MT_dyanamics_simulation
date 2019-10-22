@@ -2,7 +2,7 @@
 This is a simulation of microtubule dynamics simply assuming growth rate, shrinkage rate, catastrophe frequency and rescue frequency
 
 For simulation, assign a parameter set to the variable `param` in Microtubule_dynamic_simulation.Rmd.
-```
+```{r}
 param <- tibble(
     group_name = c("Control", "Kinesin-13 KO"),
     mean_gr = c(0.147, 0.093), # mean growth rate
